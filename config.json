@@ -1,0 +1,6 @@
+{
+  "password": "changeme",
+  "port": 3000,
+  "allowPublicViewing": true
+}
+

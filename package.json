@@ -1,0 +1,16 @@
+{
+  "name": "vrchat-spout-bridge",
+  "version": "1.0.0",
+  "description": "Spout bridge for VRChat camera control",
+  "main": "spout-bridge.js",
+  "scripts": {
+    "start": "node spout-bridge.js"
+  },
+  "dependencies": {
+    "ffi-napi": "^4.0.3",
+    "ref-napi": "^3.0.3",
+    "ref-struct-napi": "^1.1.1",
+    "sharp": "^0.33.0"
+  }
+}
+
