@@ -53,10 +53,9 @@ function createSession() {
 let cfg = {
   oscHost: '127.0.0.1',
   oscPort: 9000,
-  // Default OSC address mappings — these are examples. Update to match VRChat OSC documentation if different.
-  addressPosition: '/camera/position',
-  addressRotation: '/camera/rotation',
-  addressFov: '/camera/fov'
+  // OSC address mappings based on VRChat 2025.3.3 documentation
+  addressPose: '/usercamera/Pose',  // Position & rotation: (x, y, z, pitch, yaw, roll)
+  addressZoom: '/usercamera/Zoom'   // Zoom slider: 20-150, default 45
 };
 
 // Local camera state (server-side authoritative so UI can send deltas)
@@ -67,12 +66,122 @@ const state = {
   pitch: 0,
   yaw: 0,
   roll: 0,
-  fov: 60
+  zoom: 45  // Default zoom per VRChat docs (20-150 range)
 };
 
 const oscSocket = dgram.createSocket('udp4');
 
+// OSC Receiver - listen for incoming OSC messages
+const oscReceiver = dgram.createSocket('udp4');
+
 function pad4(n) { return (4 - (n % 4)) % 4; }
+
+// Parse OSC message
+function parseOscMessage(buffer) {
+  let offset = 0;
+  
+  // Read address pattern (null-terminated string, padded to 4 bytes)
+  const addressEnd = buffer.indexOf(0, offset);
+  if (addressEnd === -1) return null;
+  const address = buffer.toString('utf8', offset, addressEnd);
+  offset = addressEnd + 1;
+  offset = Math.ceil(offset / 4) * 4; // Pad to 4 bytes
+  
+  // Read type tag (starts with ',', null-terminated, padded to 4 bytes)
+  if (offset >= buffer.length) return { address, types: '', args: [] };
+  const typeTagEnd = buffer.indexOf(0, offset);
+  if (typeTagEnd === -1) return null;
+  const typeTag = buffer.toString('utf8', offset, typeTagEnd);
+  offset = typeTagEnd + 1;
+  offset = Math.ceil(offset / 4) * 4; // Pad to 4 bytes
+  
+  // Parse arguments based on type tag
+  const types = typeTag.substring(1); // Skip the ','
+  const args = [];
+  
+  for (let i = 0; i < types.length && offset < buffer.length; i++) {
+    const type = types[i];
+    
+    if (type === 'f') {
+      // Float (4 bytes, big-endian)
+      if (offset + 4 > buffer.length) break;
+      args.push(buffer.readFloatBE(offset));
+      offset += 4;
+    } else if (type === 'i') {
+      // Integer (4 bytes, big-endian)
+      if (offset + 4 > buffer.length) break;
+      args.push(buffer.readInt32BE(offset));
+      offset += 4;
+    } else if (type === 's') {
+      // String (null-terminated, padded to 4 bytes)
+      const strEnd = buffer.indexOf(0, offset);
+      if (strEnd === -1) break;
+      args.push(buffer.toString('utf8', offset, strEnd));
+      offset = strEnd + 1;
+      offset = Math.ceil(offset / 4) * 4;
+    } else if (type === 'b') {
+      // Blob (4-byte size + data, padded to 4 bytes)
+      if (offset + 4 > buffer.length) break;
+      const blobSize = buffer.readInt32BE(offset);
+      offset += 4;
+      if (offset + blobSize > buffer.length) break;
+      args.push(buffer.slice(offset, offset + blobSize));
+      offset += blobSize;
+      offset = Math.ceil(offset / 4) * 4;
+    } else {
+      // Unknown type, skip
+      continue;
+    }
+  }
+  
+  return { address, types, args };
+}
+
+// Handle incoming OSC messages
+oscReceiver.on('message', (msg, rinfo) => {
+  try {
+    const parsed = parseOscMessage(msg);
+    if (!parsed) {
+      console.log(`[OSC] Received invalid message from ${rinfo.address}:${rinfo.port}`);
+      return;
+    }
+    
+    const { address, types, args } = parsed;
+    
+    // Log all OSC messages
+    console.log(`[OSC] ${address}: (${args.map(a => typeof a === 'number' ? a.toFixed(6) : a).join(', ')})`);
+    
+    // Handle specific addresses based on VRChat OSC documentation
+    if (address === '/usercamera/Pose' && args.length >= 6) {
+      // Update state from VRChat camera pose
+      // Format: (x, y, z, pitch, yaw, roll) - 6 floats
+      state.x = args[0];
+      state.y = args[1];
+      state.z = args[2];
+      state.pitch = args[3];
+      state.yaw = args[4];
+      state.roll = args[5];
+      console.log(`[OSC] Updated camera pose: x=${state.x.toFixed(2)} y=${state.y.toFixed(2)} z=${state.z.toFixed(2)} pitch=${state.pitch.toFixed(2)} yaw=${state.yaw.toFixed(2)} roll=${state.roll.toFixed(2)}`);
+    } else if (address === '/usercamera/Zoom' && args.length >= 1) {
+      // Update zoom from VRChat (range: 20-150)
+      state.zoom = Math.max(20, Math.min(150, args[0]));
+      console.log(`[OSC] Updated zoom: ${state.zoom.toFixed(2)}`);
+    }
+    // Add more handlers for other OSC addresses as needed
+    
+  } catch (err) {
+    console.error('[OSC] Error parsing message:', err.message);
+  }
+});
+
+oscReceiver.on('error', (err) => {
+  console.error('[OSC Receiver] Error:', err);
+});
+
+// Start OSC receiver on port 9000
+oscReceiver.bind(9000, '0.0.0.0', () => {
+  console.log('[OSC] Listening for OSC messages on port 9000');
+});
 
 function writePaddedString(str) {
   const s = Buffer.from(str + '\0');
@@ -128,10 +237,19 @@ function sendOsc(address, types, args) {
 }
 
 function broadcastState() {
-  // send current state to VRChat using configured addresses
-  sendOsc(cfg.addressPosition, ['f','f','f'], [state.x, state.y, state.z]);
-  sendOsc(cfg.addressRotation, ['f','f','f'], [state.pitch, state.yaw, state.roll]);
-  sendOsc(cfg.addressFov, ['f'], [state.fov]);
+  // Send pose to VRChat: /usercamera/Pose expects 6 floats (x, y, z, pitch, yaw, roll)
+  sendOsc(cfg.addressPose, ['f','f','f','f','f','f'], [
+    state.x, 
+    state.y, 
+    state.z, 
+    state.pitch, 
+    state.yaw, 
+    state.roll
+  ]);
+  // Send zoom if configured
+  if (cfg.addressZoom) {
+    sendOsc(cfg.addressZoom, ['f'], [state.zoom]);
+  }
 }
 
 // Serve static files from ./public
@@ -263,9 +381,8 @@ const server = http.createServer((req, res) => {
         }
         if (body.oscHost) cfg.oscHost = body.oscHost;
         if (body.oscPort) cfg.oscPort = Number(body.oscPort);
-        if (body.addressPosition) cfg.addressPosition = body.addressPosition;
-        if (body.addressRotation) cfg.addressRotation = body.addressRotation;
-        if (body.addressFov) cfg.addressFov = body.addressFov;
+        if (body.addressPose) cfg.addressPose = body.addressPose;
+        if (body.addressZoom !== undefined) cfg.addressZoom = body.addressZoom;
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ok:true, cfg}));
       });
@@ -286,7 +403,7 @@ const server = http.createServer((req, res) => {
           if (typeof body.pitch === 'number') state.pitch = body.pitch;
           if (typeof body.yaw === 'number') state.yaw = body.yaw;
           if (typeof body.roll === 'number') state.roll = body.roll;
-          if (typeof body.fov === 'number') state.fov = body.fov;
+          if (typeof body.zoom === 'number') state.zoom = Math.max(20, Math.min(150, body.zoom));
         } else {
           if (typeof body.dx === 'number') state.x += body.dx;
           if (typeof body.dy === 'number') state.y += body.dy;
@@ -294,12 +411,12 @@ const server = http.createServer((req, res) => {
           if (typeof body.dpitch === 'number') state.pitch += body.dpitch;
           if (typeof body.dyaw === 'number') state.yaw += body.dyaw;
           if (typeof body.droll === 'number') state.roll += body.droll;
-          if (typeof body.dfov === 'number') state.fov += body.dfov;
+          if (typeof body.dzoom === 'number') state.zoom += body.dzoom;
         }
 
-        // bounding / normalization
-        if (state.fov < 1) state.fov = 1;
-        if (state.fov > 179) state.fov = 179;
+        // bounding / normalization for zoom (VRChat range: 20-150)
+        if (state.zoom < 20) state.zoom = 20;
+        if (state.zoom > 150) state.zoom = 150;
 
         // Send to VRChat via OSC
         try { broadcastState(); } catch (e) { console.error(e); }
@@ -391,12 +508,24 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`====================================`);
   console.log(`Authentication: ${serverConfig.password === 'changeme' ? '⚠️  DEFAULT PASSWORD - Change it in config.json!' : 'Enabled'}`);
   console.log(`Public viewing: ${serverConfig.allowPublicViewing ? 'Enabled' : 'Disabled (requires login)'}`);
-  console.log(`Sending OSC to ${cfg.oscHost}:${cfg.oscPort}`);
+  console.log(`OSC Sender: ${cfg.oscHost}:${cfg.oscPort}`);
+  console.log(`OSC Receiver: Listening on port 9000 for all OSC messages`);
   console.log(`\n💡 If you can't access from other devices:`);
   console.log(`   1. Check Windows Firewall - allow port ${PORT}`);
   console.log(`   2. Verify server is running on 0.0.0.0:${PORT}`);
   console.log(`   3. Try: http://192.168.1.48:${PORT}/`);
   console.log(`====================================\n`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\nShutting down...');
+  oscReceiver.close();
+  oscSocket.close();
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
 });
 
 // -- Spout / snapshot placeholder --
