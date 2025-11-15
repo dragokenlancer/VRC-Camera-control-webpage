@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>VRChat Camera Bridge</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>VRChat Camera Bridge</h1>
+    
+    <!-- Login Form -->
+    <div id="loginDiv" class="panel" style="display:none;">
+      <h3>Login Required</h3>
+      <form id="loginForm">
+        <div style="margin-bottom:10px;">
+          <label>Password: <input id="passwordInput" type="password" autocomplete="current-password" style="margin-left:10px;padding:5px;" /></label>
+        </div>
+        <button type="submit" style="padding:8px 16px;">Login</button>
+        <div id="loginError" style="color:red;margin-top:10px;"></div>
+      </form>
+    </div>
+    
+    <!-- Main Controls -->
+    <div id="controlsDiv" class="panel">
+      <div style="text-align:right;margin-bottom:10px;">
+        <span id="authStatus" style="font-size:0.9em;color:#666;"></span>
+        <button id="logoutBtn" style="margin-left:10px;padding:5px 10px;display:none;">Logout</button>
+      </div>
+      <div class="videoPreview">
+        <h3>Spout Camera Preview</h3>
+        <img id="spoutImg" src="/api/spout" alt="spout preview" style="width:100%;max-height:360px;object-fit:contain;background:#000" />
+      </div>
+      <hr />
+      <div>
+        <button id="up">Up</button>
+        <button id="down">Down</button>
+        <button id="forward">Forward</button>
+        <button id="back">Back</button>
+        <button id="left">Left</button>
+        <button id="right">Right</button>
+      </div>
+      <div style="margin-top:10px;">
+        <button id="yawLeft">Yaw &lt;</button>
+        <button id="yawRight">Yaw &gt;</button>
+        <button id="pitchUp">Pitch ^</button>
+        <button id="pitchDown">Pitch v</button>
+      </div>
+      <div style="margin-top:10px;">
+        <label>Speed: <input id="speed" type="range" min="0.01" max="1" step="0.01" value="0.1"></label>
+      </div>
+      <div class="state" id="state"></div>
+    </div>
+    <p>Use arrow keys / WASD to move, QE to change yaw, R/F for up/down. <span id="loginHint" style="color:#999;">(Login required to control)</span></p>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
