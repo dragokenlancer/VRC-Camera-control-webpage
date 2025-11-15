@@ -202,7 +202,7 @@ function intToBuffer(i) {
   return b;
 }
 
-// Build a simple OSC message buffer for address and simple arg types (f,i,s)
+// Build a simple OSC message buffer for address and simple arg types (f,i,s,T,F)
 function buildOscMessage(address, types, args) {
   const addressBuf = writePaddedString(address);
   const typeTag = ',' + types.join('');
@@ -216,6 +216,10 @@ function buildOscMessage(address, types, args) {
     else if (t === 'i') argBufs.push(intToBuffer(Number(a)));
     else if (t === 's') {
       argBufs.push(writePaddedString(String(a)));
+    } else if (t === 'T' || t === 'F') {
+      // OSC boolean types: 'T' (true) and 'F' (false) have no argument data
+      // The type tag itself indicates the value
+      // No argument buffer needed
     } else {
       // unsupported type, send string fallback
       argBufs.push(writePaddedString(String(a)));
@@ -250,6 +254,12 @@ function broadcastState() {
   if (cfg.addressZoom) {
     sendOsc(cfg.addressZoom, ['f'], [state.zoom]);
   }
+}
+
+function turnOffFlying() {
+  // Turn off flying mode in VRChat camera (send false)
+  // Using 'F' for proper OSC boolean false
+  sendOsc('/usercamera/Flying', ['F'], []);
 }
 
 // Serve static files from ./public
@@ -419,7 +429,11 @@ const server = http.createServer((req, res) => {
         if (state.zoom > 150) state.zoom = 150;
 
         // Send to VRChat via OSC
-        try { broadcastState(); } catch (e) { console.error(e); }
+        try { 
+          broadcastState(); 
+          // Automatically turn off flying mode after user input
+          //turnOffFlying();
+        } catch (e) { console.error(e); }
 
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ok:true, state}));
